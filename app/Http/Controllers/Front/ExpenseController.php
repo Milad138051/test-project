@@ -28,7 +28,6 @@ class ExpenseController extends Controller
 
     public function create()
     {
-        //farzan categories ro hamin se ta dar nazar migirim va dige query nemizanim
         $categories=$this->categoryRepository->all();
         return view('front.expense.create', compact('categories'));
     }
@@ -54,7 +53,6 @@ class ExpenseController extends Controller
             //فرضی
         $inputs['user_id'] = 1;
 
-//        Expense::create($inputs);
         $this->expenseRepository->create($inputs);
         return redirect()->route('expenses.index')->with('success', 'درخواست با موفقیت ثبت شد.');
     }
@@ -116,12 +114,8 @@ class ExpenseController extends Controller
         return $banks[$bankCode] ?? null;
     }
 
-    protected function callBankApi($payment)
+    protected function callBankApi($payment,$amount,$iban)
     {
-        // اینجا کدهای لازم برای فراخوانی API بانکی نوشته میشود
-        // فرض می‌کنیم یک API فرضی داریم که ریسپانسش به صورت زیر هست
-        //  اینجا فقط برای مثال از یک آرایه استفاده می‌کنیم
-
         $response = [
             'status' => 'success', // یا 'failed'
             'message' => 'Transaction completed.',
