@@ -77,6 +77,9 @@ class ExpenseController extends Controller
 
         // دریافت API مربوط به بانک
         $bankApi = $payment->getBankApi();
+		if (!$bankApi) {
+                throw new Exception('Bank API not found.');
+        }
 
         $payment = \App\Models\Payment::create([
             'cost_request_id' => $expense->id,
@@ -99,6 +102,7 @@ class ExpenseController extends Controller
             }
         } catch (\Exception $e) {
             Log::error('Exception during payment processing: ' . $e->getMessage());
+			return back()->with('error', $e->getMessage());
         }
     }
 
