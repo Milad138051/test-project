@@ -5,11 +5,11 @@ namespace App\Http\Controllers\Front;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Front\ExpenseRequest;
 use App\Http\Services\File\FileService;
+use App\Http\Services\PaymentService;
 use App\Models\Expense;
 use App\Models\User;
 use App\Repositories\CategoryRepository;
 use App\Repositories\ExpenseRepository;
-use Faker\Provider\Payment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -18,7 +18,7 @@ class ExpenseController extends Controller
     private $expenseRepository;
     private $categoryRepository;
 
-    public function __construct(ExpenseRepository $expenseRepository,CategoryRepository $categoryRepository)
+    public function __construct(ExpenseRepository $expenseRepository, CategoryRepository $categoryRepository)
     {
         $this->expenseRepository = $expenseRepository;
         $this->categoryRepository = $categoryRepository;
@@ -26,29 +26,29 @@ class ExpenseController extends Controller
 
     public function create()
     {
-        $categories=$this->categoryRepository->all();
+        $categories = $this->categoryRepository->all();
         return view('front.expense.create', compact('categories'));
     }
 
-    public function store(ExpenseRequest $request,FileService $fileService)
+    public function store(ExpenseRequest $request, FileService $fileService)
     {
-        $inputs=$request->all();
+        $inputs = $request->all();
         //فرضی
         $inputs['national_code'] = 123456789;
 
         // چک کردن وجود کاربر
-        $user = User::where('national_code',$inputs['national_code'])->first();
+        $user = User::where('national_code', $inputs['national_code'])->first();
         if (!$user) {
             return redirect()->back()->withErrors(['national_code' => 'کاربر وجود ندارد.']);
         }
 
-        if($request->hasFile('attachment')) {
+        if ($request->hasFile('attachment')) {
             $fileService->setExclusiveDirectory('attachments' . DIRECTORY_SEPARATOR . 'expenses');
             $fileService->setFileSize($request->file('attachment'));
             $result = $fileService->moveToPublic($request->file('attachment'));
             $inputs['attachment'] = $result;
         }
-            //فرضی
+        //فرضی
         $inputs['user_id'] = 1;
 
         $this->expenseRepository->create($inputs);
@@ -58,35 +58,36 @@ class ExpenseController extends Controller
     public function myExpenses()
     {
         // farzan man user 1 hastam
-        $expenses=$this->expenseRepository->where('user_id',1)->get();
-        return view('front.expense.my-requests',compact('expenses'));
+        $expenses = $this->expenseRepository->where('user_id', 1)->get();
+        return view('front.expense.my-requests', compact('expenses'));
     }
 
-    public function processPayment(Request $request,Expense $expense)
+    public function processPayment(Request $request, Expense $expense)
     {
         $request->validate([
             'amount' => 'required|numeric',
             'sheba_number' => 'required|string',
         ]);
 
-        // شناسایی بانک بر اساس شماره شبا
-        $bankCode = substr($expense->iban, 0, 2);
-        if (!in_array($bankCode, ['11', '22', '33'])) {
-            return back()->with('error','Invalid Sheba number.');
-        }
-        $bankApi = $this->getBankApi($bankCode); // دریافت API مربوط به بانک
+        // فراخوانی سرویس پرداخت
+        $payment = new PaymentService($expense);
 
-        $payment = Payment::create([
+        // شناسایی بانک بر اساس شماره شبا
+        $payment->identifyBank();
+
+        // دریافت API مربوط به بانک
+        $bankApi = $payment->getBankApi();
+
+        $payment = \App\Models\Payment::create([
             'cost_request_id' => $expense->id,
             'amount' => $expense->amount,
             'sheba_number' => $expense->sheba_number,
-            'bank_code' => $bankCode,
+            'bank_code' => substr($expense->iban, 0, 2),
             'status' => 'pending',
         ]);
 
         try {
-
-            $apiResponse = $this->callBankApi($bankApi, $payment->amount, $expense->iban);
+            $apiResponse = $payment->callBankApi($bankApi, $payment->amount, $expense->iban);
 
             if ($apiResponse['status'] == 'success') {
                 $payment->update(['status' => 'success']);
@@ -96,37 +97,17 @@ class ExpenseController extends Controller
                 Log::error('Payment failed: ' . $apiResponse['message']);
                 return back()->with('success', 'پرداخت با مشکل مواجه شد.');
             }
-        }catch (\Exception $e) {
-             Log::error('Exception during payment processing: ' . $e->getMessage());
-}
-
-}
-    private function getBankApi($bankCode)
-    {
-        $banks = [
-            '11' => ['name' => 'Bank 1', 'api_url' => 'https://api.bank1.com/pay'],
-            '22' => ['name' => 'Bank 2', 'api_url' => 'https://api.bank2.com/pay'],
-            '33' => ['name' => 'Bank 3', 'api_url' => 'https://api.bank3.com/pay'],
-        ];
-
-        return $banks[$bankCode] ?? null;
+        } catch (\Exception $e) {
+            Log::error('Exception during payment processing: ' . $e->getMessage());
+        }
     }
 
-    protected function callBankApi($payment,$amount,$iban)
-    {
-        $response = [
-            'status' => 'success', // یا 'failed'
-            'message' => 'Transaction completed.',
-        ];
-
-        return $response;
-    }
 
 
     public function schedulePayments(Expense $expense)
     {
-        $payment=\App\Models\Payment::where('expense_id',$expense->id)->first();
-        $payment->update(['is_scheduled'=>1]);
+        $payment = \App\Models\Payment::where('expense_id', $expense->id)->first();
+        $payment->update(['is_scheduled' => 1]);
         return back()->with('message', 'پرداخت‌ بصورت روزانه زمان‌بندی شد.');
     }
 
